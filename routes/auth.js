@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const authMiddleware = require('../middleware/authMiddleware');   // ← nueva línea
 
 router.post('/register', async (req, res) => {
   const { role, alias, phone, email, password } = req.body;
@@ -60,6 +61,18 @@ router.post('/login', async (req, res) => {
   } catch (error) {
     console.error('Error durante el login:', error);
     res.status(500).json({ message: 'Error interno del servidor durante el login.' });
+  }
+});
+
+// GET /api/auth/me  → devuelve los datos del usuario autenticado
+router.get('/me', authMiddleware, async (req, res) => {
+  try {
+    // req.user lo pone authMiddleware tras verificar el JWT
+    const user = await User.findById(req.user.id).select('-password');
+    res.status(200).json(user);
+  } catch (err) {
+    console.error('Error en /me:', err);
+    res.status(500).json({ message: 'Error interno del servidor.' });
   }
 });
 
