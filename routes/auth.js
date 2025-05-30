@@ -7,28 +7,39 @@ const authMiddleware = require('../middleware/authMiddleware');
 
 // Registro y login (ya los tenías)
 
+// GET /api/auth/me  → devuelve los datos del usuario autenticado + plan desde MySQL
 router.get('/me', authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select('-password');
     if (!user) {
-      return res.status(404).json({ message: 'Usuario no encontrado' });
+      return res.status(404).json({ message: 'Usuario no encontrado.' });
     }
 
-    // Obtener el plan desde MySQL
-    const [rows] = await req.mysql.execute(
-      `SELECT nombre_plan FROM planes_usuario WHERE usuario_id = ? ORDER BY id DESC LIMIT 1`,
-      [user._id.toString()]
-    );
+    // Obtener plan desde MySQL
+    let nombre_plan = 'gratis';
+    if (req.mysql) {
+      try {
+        const [rows] = await req.mysql.execute(
+          `SELECT nombre_plan FROM planes_usuario WHERE usuario_id = ? ORDER BY fecha_expiracion DESC LIMIT 1`,
+          [user._id.toString()]
+        );
+        if (rows.length > 0) {
+          nombre_plan = rows[0].nombre_plan;
+        }
+      } catch (mysqlErr) {
+        console.error('Error al consultar plan en MySQL:', mysqlErr);
+      }
+    }
 
-    const nombre_plan = rows.length > 0 ? rows[0].nombre_plan : 'gratis';
-
-    // Incluir el plan en la respuesta
+    // Enviar respuesta unificada
     res.status(200).json({
-      _id: user._id,
-      email: user.email,
-      alias: user.alias,
-      role: user.role,
-      plan: nombre_plan
+      user: {
+        _id: user._id,
+        email: user.email,
+        alias: user.alias,
+        role: user.role,
+        nombre_plan
+      }
     });
   } catch (err) {
     console.error('Error en /me:', err);
