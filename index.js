@@ -1,34 +1,39 @@
-require('dotenv').config();
+
 const express = require('express');
 const mongoose = require('mongoose');
-const cors = require('cors');
+const dotenv = require('dotenv');
+const authRoutes = require('./routes/auth');
 
-const authRoutes = require('./routes/auth'); // Contiene las rutas /register, /login, /me
-const protectedRoutes = require('./routes/protected');
+dotenv.config();
 
 const app = express();
-
-app.use(cors());
 app.use(express.json());
 
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log('MongoDB connected successfully'))
-  .catch(err => console.error('MongoDB connection error:', err));
+// Conexión MongoDB
+mongoose.connect(process.env.MONGO_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+}).then(() => console.log('MongoDB conectado'))
+  .catch((err) => console.error('Error MongoDB:', err));
 
-// Cambia esta línea:
-// app.use('/api', authRoutes);
-// Por esta:
-app.use('/api/auth', authRoutes); // <--- CAMBIO AQUÍ
-
-// Si tus protectedRoutes también deben estar bajo /api (y no /api/auth o similar)
-// esta línea está bien como está, o puedes ajustarla si es necesario.
-// Por ejemplo, si fueran /api/protected/ruta, sería app.use('/api/protected', protectedRoutes);
-app.use('/api', protectedRoutes); // Asumiendo que las rutas en protected.js no tienen 'protected'
-
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).send({ message: 'Algo salió mal en el servidor!' });
+// Conexión MySQL (Hostinger)
+const mysql = require('mysql2/promise');
+const pool = mysql.createPool({
+  host: process.env.MYSQL_HOST,
+  user: process.env.MYSQL_USER,
+  password: process.env.MYSQL_PASSWORD,
+  database: process.env.MYSQL_DB,
+  waitForConnections: true,
+  connectionLimit: 10
+});
+app.use((req, res, next) => {
+  req.mysql = pool;
+  next();
 });
 
+// Rutas
+app.use('/api/auth', authRoutes);
+
+// Inicio
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Servidor corriendo en el puerto ${PORT}`));
+app.listen(PORT, () => console.log(`Servidor backend corriendo en puerto ${PORT}`));
