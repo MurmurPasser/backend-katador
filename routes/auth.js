@@ -57,7 +57,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// GET /api/auth/me (ya lo tienes)
+// GET /api/auth/me
 router.get('/me', authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select('-password');
@@ -65,11 +65,15 @@ router.get('/me', authMiddleware, async (req, res) => {
 
     let nombre_plan = 'gratis';
     if (req.mysql) {
-      const [rows] = await req.mysql.execute(
-        `SELECT nombre_plan FROM planes_usuario WHERE usuario_id = ? ORDER BY fecha_expiracion DESC LIMIT 1`,
-        [user._id.toString()]
-      );
-      if (rows.length > 0) nombre_plan = rows[0].nombre_plan;
+      try {
+        const [rows] = await req.mysql.execute(
+          `SELECT nombre_plan FROM planes_usuario WHERE usuario_id = ? ORDER BY fecha_expiracion DESC LIMIT 1`,
+          [user._id.toString()]
+        );
+        if (rows.length > 0) nombre_plan = rows[0].nombre_plan;
+      } catch (mysqlErr) {
+        console.error('⚠️ Error al consultar plan en MySQL:', mysqlErr.message);
+      }
     }
 
     res.status(200).json({
@@ -82,7 +86,7 @@ router.get('/me', authMiddleware, async (req, res) => {
       }
     });
   } catch (err) {
-    console.error('Error en /me:', err);
+    console.error('Error en /me:', err.message);
     res.status(500).json({ message: 'Error interno del servidor.' });
   }
 });
