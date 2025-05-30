@@ -1,13 +1,13 @@
-// routes/auth.js
+// ✅ Archivo: routes/auth.js
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const authMiddleware = require('../middleware/authMiddleware');
 
-// Registro y login (ya los tenías)
+// Registro y login (ya los tenías aquí arriba)
 
-// GET /api/auth/me  → devuelve los datos del usuario autenticado + plan desde MySQL
+// ✅ GET /api/auth/me  → devuelve los datos del usuario autenticado + plan desde MySQL
 router.get('/me', authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select('-password');
@@ -15,7 +15,7 @@ router.get('/me', authMiddleware, async (req, res) => {
       return res.status(404).json({ message: 'Usuario no encontrado.' });
     }
 
-    // Obtener plan desde MySQL
+    // Obtener plan desde MySQL (por defecto: gratis)
     let nombre_plan = 'gratis';
     if (req.mysql) {
       try {
@@ -31,7 +31,7 @@ router.get('/me', authMiddleware, async (req, res) => {
       }
     }
 
-    // Enviar respuesta unificada
+    // Enviar respuesta final
     res.status(200).json({
       user: {
         _id: user._id,
