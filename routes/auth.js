@@ -2,8 +2,9 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const authMiddleware = require('../middleware/authMiddleware');   // ← nueva línea
+const authMiddleware = require('../middleware/authMiddleware'); // ← necesario para proteger /me
 
+// Registro
 router.post('/register', async (req, res) => {
   const { role, alias, phone, email, password } = req.body;
   try {
@@ -32,6 +33,7 @@ router.post('/register', async (req, res) => {
   }
 });
 
+// Login
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
@@ -64,12 +66,39 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// GET /api/auth/me  → devuelve los datos del usuario autenticado
+// GET /api/auth/me → Devuelve usuario de MongoDB + plan desde MySQL
 router.get('/me', authMiddleware, async (req, res) => {
   try {
-    // req.user lo pone authMiddleware tras verificar el JWT
-    const user = await User.findById(req.user.id).select('-password');
-    res.status(200).json(user);
+    const mongoUser = await User.findById(req.user.id).select('-password');
+    if (!mongoUser) return res.status(404).json({ message: 'Usuario no encontrado.' });
+
+    const connection = await req.mysql.getConnection(); // ← mysql pool inyectado por middleware
+    const [rows] = await connection.query(
+      `SELECT nombre_plan, fecha_inicio, fecha_expiracion
+       FROM planes_usuario
+       WHERE usuario_id = ?`,
+      [mongoUser.id]
+    );
+    connection.release();
+
+    const plan = rows[0] || {
+      nombre_plan: 'gratis',
+      fecha_inicio: null,
+      fecha_expiracion: null
+    };
+
+    const response = {
+      _id: mongoUser._id,
+      alias: mongoUser.alias,
+      email: mongoUser.email,
+      role: mongoUser.role,
+      nombre_plan: plan.nombre_plan,
+      fecha_inicio: plan.fecha_inicio,
+      fecha_expiracion: plan.fecha_expiracion
+    };
+
+    res.json({ user: response });
+
   } catch (err) {
     console.error('Error en /me:', err);
     res.status(500).json({ message: 'Error interno del servidor.' });
