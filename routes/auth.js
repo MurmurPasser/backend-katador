@@ -7,11 +7,11 @@ const mysql = require('mysql2/promise');
 
 // Pool de Conexión a MySQL en Railway (donde están usuarios y planes_usuario)
 const poolMySqlRailway = mysql.createPool({
-  host: process.env.MYSQL_HOST_RAILWAY, // ej. interchange.proxy.rlwy.net
-  user: process.env.MYSQL_USER_RAILWAY,
-  password: process.env.MYSQL_PASSWORD_RAILWAY,
-  database: process.env.MYSQL_DB_RAILWAY, // ej. railway
-  port: process.env.MYSQL_PORT_RAILWAY, // ej. 52801
+  host: process.env.MYSQLHOST,             // <--- CAMBIADO
+  user: process.env.MYSQLUSER,             // <--- CAMBIADO
+  password: process.env.MYSQLPASSWORD,       // <--- CAMBIADO
+  database: process.env.MYSQLDATABASE,       // <--- CAMBIADO
+  port: process.env.MYSQLPORT,             // <--- CAMBIADO
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
