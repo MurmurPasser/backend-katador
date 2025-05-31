@@ -21,8 +21,11 @@ mongoose.connect(process.env.MONGO_URI, {
 });
 
 // Rutas
-const authRoutes = require('./routes/auth'); // debe exportar un router válido
-app.use('/api/auth', authRoutes); // aquí era donde fallaba
+const authRoutes = require('./routes/auth');
+const creditRoutes = require('./routes/credits'); // NUEVA RUTA
+
+app.use('/api/auth', authRoutes);
+app.use('/api/credits', creditRoutes); // NUEVA RUTA
 
 // Ruta base de prueba
 app.get('/', (req, res) => {
