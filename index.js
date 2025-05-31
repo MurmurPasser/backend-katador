@@ -1,45 +1,35 @@
 const express = require('express');
-const mongoose = require('mongoose');
-const dotenv = require('dotenv');
 const cors = require('cors');
-const authRoutes = require('./routes/auth');
-
-dotenv.config();
+const mongoose = require('mongoose');
+require('dotenv').config();
 
 const app = express();
+const port = process.env.PORT || 8080;
+
+// Middleware global
+app.use(cors());
 app.use(express.json());
 
-// ✅ Habilitar CORS (producción + local opcional)
-app.use(cors({
-  origin: ['https://elkatador.com', 'http://localhost:3000'],
-  credentials: true
-}));
-
-// Conexión MongoDB
+// Conexión a MongoDB
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true
-}).then(() => console.log('MongoDB conectado'))
-  .catch((err) => console.error('Error MongoDB:', err));
-
-// Conexión MySQL (Hostinger)
-const mysql = require('mysql2/promise');
-const pool = mysql.createPool({
-  host: process.env.MYSQL_HOST,
-  user: process.env.MYSQL_USER,
-  password: process.env.MYSQL_PASSWORD,
-  database: process.env.MYSQL_DB,
-  waitForConnections: true,
-  connectionLimit: 10
-});
-app.use((req, res, next) => {
-  req.mysql = pool;
-  next();
+}).then(() => {
+  console.log('✅ MongoDB conectado');
+}).catch(err => {
+  console.error('❌ Error al conectar a MongoDB:', err.message);
 });
 
 // Rutas
-app.use('/api/auth', authRoutes);
+const authRoutes = require('./routes/auth'); // debe exportar un router válido
+app.use('/api/auth', authRoutes); // aquí era donde fallaba
 
-// Inicio
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Servidor backend corriendo en puerto ${PORT}`));
+// Ruta base de prueba
+app.get('/', (req, res) => {
+  res.send('Backend Katador funcionando ✅');
+});
+
+// Inicializar servidor
+app.listen(port, () => {
+  console.log(`🚀 Servidor backend corriendo en puerto ${port}`);
+});
