@@ -112,3 +112,6 @@ router.get('/me', authMiddleware, async (req, res) => {
     if (connectionMySql) connectionMySql.release();
   }
 });
+// Última línea del archivo auth.js
+module.exports = router;
+
