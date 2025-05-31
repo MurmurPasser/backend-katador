@@ -32,108 +32,83 @@ const poolMySqlRailway = mysql.createPool({
   }
 })();
 
-router.post('/register', async (req, res) => {
-  const { role, alias, phone, email, password } = req.body;
-  if (!role || !alias || !email || !password) {
-    return res.status(400).json({ message: 'Faltan campos requeridos (role, alias, email, password).' });
-  }
-
+router.get('/me', authMiddleware, async (req, res) => {
   let connectionMySql = null;
-  let savedUserMongo = null;
-
   try {
-    const existingUserMongo = await User.findOne({ email });
-    if (existingUserMongo) {
-      return res.status(400).json({ message: 'El correo electrónico ya está registrado en el sistema principal.' });
+    const userMongoId = req.user.id;
+    const userMongo = await User.findById(userMongoId).select('-password');
+    if (!userMongo) {
+      return res.status(404).json({ message: 'Usuario principal no encontrado.' });
     }
 
-    const userMongo = new User({
-      role,
-      alias,
-      phone: (role === 'modelo' && phone && phone.trim() !== '') ? phone.trim() : undefined,
-      email,
-      password
-    });
-    savedUserMongo = await userMongo.save();
+    let planInfo = { nombre_plan: 'Gratis', fecha_expiracion: null, message: "Plan por defecto (Gratis)." };
+    let creditosInfo = { creditos_actuales: 0, message: "Créditos no encontrados, usando 0." };
 
     connectionMySql = await poolMySqlRailway.getConnection();
-    await connectionMySql.beginTransaction();
-
-    const [resultInsertUserMySQL] = await connectionMySql.execute(
-      'INSERT INTO usuarios (mongodb_id, nombre_usuario, tipo_usuario, correo, fecha_registro, estado) VALUES (?, ?, ?, ?, NOW(), ?)',
-      [savedUserMongo._id.toString(), alias, role, email, 'activo']
+    const [mysqlUserRows] = await connectionMySql.execute(
+      'SELECT id, tipo_usuario, estado FROM usuarios WHERE mongodb_id = ? LIMIT 1',
+      [userMongoId.toString()]
     );
-    const mySqlUserId = resultInsertUserMySQL.insertId;
 
-    const defaultPlanName = 'Gratis';
-    const fechaInicio = new Date();
-    const fechaInicioSQL = fechaInicio.toISOString().slice(0, 19).replace('T', ' ');
+    if (mysqlUserRows.length > 0) {
+      const mySqlUserId = mysqlUserRows[0].id;
+      const mysqlUserEstado = mysqlUserRows[0].estado;
 
-    const planesConfig = [
-      { nombre: "Gratis", duracion_dias: 7, creditos_incluidos: 3 },
-      { nombre: "Básico", duracion_dias: 7, creditos_incluidos: 30 }
-    ];
-    const planGratisConfig = planesConfig.find(p => p.nombre.toLowerCase() === defaultPlanName.toLowerCase());
+      if (mysqlUserEstado !== 'activo') {
+        planInfo.message = `El estado de tu cuenta es '${mysqlUserEstado}'. Se aplican beneficios del plan gratuito.`;
+        creditosInfo.message = `Estado de cuenta '${mysqlUserEstado}'. No se aplican créditos adicionales.`;
+      } else {
+        const [planRows] = await connectionMySql.execute(
+          'SELECT nombre_plan, fecha_inicio, fecha_expiracion FROM planes_usuario WHERE usuario_id = ? AND fecha_expiracion >= CURDATE() ORDER BY fecha_expiracion DESC LIMIT 1',
+          [mySqlUserId]
+        );
 
-    if (!planGratisConfig) {
-      console.error("Configuración del plan 'Gratis' no encontrada en el backend.");
-      await connectionMySql.rollback();
-      if (savedUserMongo) await User.findByIdAndDelete(savedUserMongo._id);
-      return res.status(500).json({ message: 'Error de configuración interna del servidor (plan base).' });
+        if (planRows.length > 0) {
+          planInfo = {
+            nombre_plan: planRows[0].nombre_plan,
+            fecha_inicio: planRows[0].fecha_inicio,
+            fecha_expiracion: planRows[0].fecha_expiracion,
+          };
+        } else {
+          planInfo.message = "No se encontró plan activo o ha expirado. Usando plan Gratis.";
+        }
+
+        const [creditosRows] = await connectionMySql.execute(
+          'SELECT creditos_actuales FROM creditos_usuario WHERE usuario_id = ? LIMIT 1',
+          [mySqlUserId]
+        );
+
+        if (creditosRows.length > 0) {
+          creditosInfo = {
+            creditos_actuales: creditosRows[0].creditos_actuales
+          };
+        } else {
+          console.warn(`No se encontró registro de créditos para usuario_id (MySQL): ${mySqlUserId}. Asignando 0 créditos.`);
+          creditosInfo.message = "Registro de créditos no encontrado. Asignando 0.";
+        }
+      }
+    } else {
+      console.warn(`Usuario con MongoDB ID ${userMongoId} no encontrado en tabla 'usuarios' de MySQL en Railway.`);
+      planInfo.message = "Perfil de plan no configurado. Usando plan Gratis.";
+      creditosInfo.message = "Perfil de créditos no configurado. Usando 0 créditos.";
     }
 
-    const diasDuracionGratis = planGratisConfig.duracion_dias;
-    const creditosIncluidosGratis = planGratisConfig.creditos_incluidos;
-
-    const fechaExpiracion = new Date(new Date().setDate(fechaInicio.getDate() + diasDuracionGratis));
-    const fechaExpiracionSQL = fechaExpiracion.toISOString().slice(0, 19).replace('T', ' ');
-
-    await connectionMySql.execute(
-      'INSERT INTO planes_usuario (usuario_id, nombre_plan, fecha_inicio, fecha_expiracion) VALUES (?, ?, ?, ?)',
-      [mySqlUserId, defaultPlanName, fechaInicioSQL, fechaExpiracionSQL]
-    );
-
-    await connectionMySql.execute(
-      'INSERT INTO creditos_usuario (usuario_id, creditos_actuales) VALUES (?, ?)',
-      [mySqlUserId, creditosIncluidosGratis]
-    );
-
-    await connectionMySql.commit();
-
-    res.status(201).json({
-      message: 'Usuario registrado exitosamente. Ahora puedes iniciar sesión.',
-      userIdMongo: savedUserMongo._id.toString()
+    res.json({
+      user: {
+        _id: userMongo._id.toString(),
+        email: userMongo.email,
+        alias: userMongo.alias,
+        role: userMongo.role,
+        phone: userMongo.phone || '',
+        plan_info: planInfo,
+        creditos_info: creditosInfo
+      }
     });
 
   } catch (error) {
-    if (connectionMySql) {
-      try { await connectionMySql.rollback(); } catch (rbError) { console.error("Error en rollback de MySQL:", rbError); }
-    }
-    console.error('Error durante el registro:', error);
-
-    if (savedUserMongo && (error.sqlMessage || error.code === 'ER_NO_REFERENCED_ROW_2' || error.code === 'ER_NO_DEFAULT_FOR_FIELD')) {
-      try {
-        await User.findByIdAndDelete(savedUserMongo._id);
-        console.log(`Usuario ${savedUserMongo._id} eliminado de MongoDB debido a fallo en MySQL durante el registro.`);
-      } catch (deleteError) {
-        console.error(`Error al intentar eliminar usuario ${savedUserMongo._id} de MongoDB tras fallo en MySQL:`, deleteError);
-      }
-    }
-
-    if (error.name === 'ValidationError' && error.errors) {
-      const messages = Object.values(error.errors).map(val => val.message);
-      return res.status(400).json({ message: messages.join(', ') });
-    }
-    if (error.code === 11000) {
-      return res.status(400).json({ message: 'El correo electrónico ya está registrado (MongoDB).' });
-    }
-    if (error.code === 'ER_DUP_ENTRY') {
-      return res.status(400).json({ message: 'Conflicto de datos duplicados (Sistema secundario).' });
-    }
-    res.status(500).json({ message: 'Error interno del servidor durante el registro.' });
+    console.error('Error en /api/auth/me:', error);
+    res.status(500).json({ message: 'Error interno del servidor al obtener datos del usuario.' });
   } finally {
     if (connectionMySql) connectionMySql.release();
   }
 });
-
-module.exports = router;
