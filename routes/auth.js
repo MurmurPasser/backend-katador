@@ -1,12 +1,14 @@
-// routes/auth.js (Backend Railway - Node.js)
+// File: routes/auth.js (Backend Railway)
 
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const authMiddleware = require('../middleware/authMiddleware');
 const mysql = require('mysql2/promise');
 
+// Pool de conexión MySQL Railway
 const poolMySqlRailway = mysql.createPool({
   host: process.env.MYSQLHOST,
   user: process.env.MYSQLUSER,
@@ -18,20 +20,75 @@ const poolMySqlRailway = mysql.createPool({
   queueLimit: 0
 });
 
+// Verificar conexión inicial a MySQL
 (async () => {
   let testConn;
   try {
     testConn = await poolMySqlRailway.getConnection();
-    console.log("Conexión a MySQL de Railway (para planes) establecida y probada con ping.");
     await testConn.ping();
+    console.log("✅ Conexión a MySQL de Railway (para planes) establecida y probada con ping.");
   } catch (err) {
-    console.error("FALLO INICIAL al conectar/ping a MySQL de Railway (para planes):", err.message);
-    if (err.code) console.error("Código de error MySQL:", err.code);
+    console.error("❌ FALLO INICIAL al conectar/ping a MySQL:", err.message);
   } finally {
     if (testConn) testConn.release();
   }
 })();
 
+
+// 📌 Registro
+router.post('/register', async (req, res) => {
+  try {
+    const { role, alias, email, password, phone } = req.body;
+    if (!role || !alias || !email || !password) {
+      return res.status(400).json({ message: 'Faltan campos obligatorios.' });
+    }
+
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ message: 'El correo ya está registrado.' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    const nuevoUsuario = new User({ role, alias, email, password: hashedPassword, phone });
+    await nuevoUsuario.save();
+
+    const token = jwt.sign({ id: nuevoUsuario._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+
+    res.status(201).json({ token });
+  } catch (error) {
+    console.error("❌ Error en /register:", error);
+    res.status(500).json({ message: 'Error interno del servidor al registrar.' });
+  }
+});
+
+
+// 📌 Login
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Correo y contraseña requeridos.' });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) return res.status(401).json({ message: 'Usuario no encontrado.' });
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return res.status(401).json({ message: 'Contraseña incorrecta.' });
+
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+
+    res.status(200).json({ token });
+  } catch (error) {
+    console.error("❌ Error en /login:", error);
+    res.status(500).json({ message: 'Error interno del servidor al iniciar sesión.' });
+  }
+});
+
+
+// 📌 Obtener perfil con plan y créditos
 router.get('/me', authMiddleware, async (req, res) => {
   let connectionMySql = null;
   try {
@@ -55,42 +112,31 @@ router.get('/me', authMiddleware, async (req, res) => {
       const mysqlUserEstado = mysqlUserRows[0].estado;
 
       if (mysqlUserEstado !== 'activo') {
-        planInfo.message = `El estado de tu cuenta es '${mysqlUserEstado}'. Se aplican beneficios del plan gratuito.`;
-        creditosInfo.message = `Estado de cuenta '${mysqlUserEstado}'. No se aplican créditos adicionales.`;
+        planInfo.message = `El estado de tu cuenta es '${mysqlUserEstado}'. Se aplica plan gratuito.`;
+        creditosInfo.message = `Cuenta '${mysqlUserEstado}'. Sin créditos extra.`;
       } else {
         const [planRows] = await connectionMySql.execute(
           'SELECT nombre_plan, fecha_inicio, fecha_expiracion FROM planes_usuario WHERE usuario_id = ? AND fecha_expiracion >= CURDATE() ORDER BY fecha_expiracion DESC LIMIT 1',
           [mySqlUserId]
         );
-
         if (planRows.length > 0) {
           planInfo = {
             nombre_plan: planRows[0].nombre_plan,
             fecha_inicio: planRows[0].fecha_inicio,
-            fecha_expiracion: planRows[0].fecha_expiracion,
+            fecha_expiracion: planRows[0].fecha_expiracion
           };
-        } else {
-          planInfo.message = "No se encontró plan activo o ha expirado. Usando plan Gratis.";
         }
 
         const [creditosRows] = await connectionMySql.execute(
           'SELECT creditos_actuales FROM creditos_usuario WHERE usuario_id = ? LIMIT 1',
           [mySqlUserId]
         );
-
         if (creditosRows.length > 0) {
           creditosInfo = {
             creditos_actuales: creditosRows[0].creditos_actuales
           };
-        } else {
-          console.warn(`No se encontró registro de créditos para usuario_id (MySQL): ${mySqlUserId}. Asignando 0 créditos.`);
-          creditosInfo.message = "Registro de créditos no encontrado. Asignando 0.";
         }
       }
-    } else {
-      console.warn(`Usuario con MongoDB ID ${userMongoId} no encontrado en tabla 'usuarios' de MySQL en Railway.`);
-      planInfo.message = "Perfil de plan no configurado. Usando plan Gratis.";
-      creditosInfo.message = "Perfil de créditos no configurado. Usando 0 créditos.";
     }
 
     res.json({
@@ -106,12 +152,12 @@ router.get('/me', authMiddleware, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error en /api/auth/me:', error);
-    res.status(500).json({ message: 'Error interno del servidor al obtener datos del usuario.' });
+    console.error('❌ Error en /api/auth/me:', error);
+    res.status(500).json({ message: 'Error al obtener datos del usuario.' });
   } finally {
     if (connectionMySql) connectionMySql.release();
   }
 });
-// Última línea del archivo auth.js
-module.exports = router;
 
+
+module.exports = router;
