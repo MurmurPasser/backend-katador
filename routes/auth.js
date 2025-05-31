@@ -17,24 +17,24 @@ const poolMySqlRailway = mysql.createPool({
   queueLimit: 0
 });
 
-// Conexión MySQL de prueba
+// Conexión de prueba
 (async () => {
   let testConn;
   try {
     testConn = await poolMySqlRailway.getConnection();
-    console.log("Conexión a MySQL de Railway (para planes) establecida y probada con ping.");
+    console.log("✅ Conexión a MySQL de Railway (para planes) establecida y probada con ping.");
     await testConn.ping();
   } catch (err) {
-    console.error("FALLO INICIAL al conectar/ping a MySQL:", err.message);
+    console.error("❌ FALLO INICIAL al conectar a MySQL:", err.message);
   } finally {
     if (testConn) testConn.release();
   }
-});
+})();
 
 // Registro
 router.post('/register', async (req, res) => {
   try {
-    const { email, password, alias, role } = req.body;
+    const { email, password, alias, role, phone } = req.body;
 
     if (!email || !password || !alias || !role) {
       return res.status(400).json({ message: "Faltan campos obligatorios." });
@@ -43,21 +43,45 @@ router.post('/register', async (req, res) => {
     const existingUser = await User.findOne({ email });
     if (existingUser) return res.status(400).json({ message: "El usuario ya existe." });
 
-    const newUser = new User({ email, password, alias, role });
+    const newUser = new User({ email, password, alias, role, phone });
     await newUser.save();
 
     const mysqlConn = await poolMySqlRailway.getConnection();
-    await mysqlConn.execute(
-      "INSERT INTO usuarios (email, alias, tipo_usuario, mongodb_id, estado) VALUES (?, ?, ?, ?, ?)",
-      [email, alias, role, newUser._id.toString(), 'activo']
-    );
-    mysqlConn.release();
+    try {
+      // Insertar usuario en MySQL
+      const [insertResult] = await mysqlConn.execute(
+        "INSERT INTO usuarios (mongodb_id, nombre_usuario, correo, tipo_usuario, estado) VALUES (?, ?, ?, ?, ?)",
+        [newUser._id.toString(), alias, email, role, 'activo']
+      );
+      const usuario_id = insertResult.insertId;
+
+      // Insertar plan por defecto
+      const fechaInicio = new Date();
+      const fechaExp = new Date();
+      fechaExp.setDate(fechaInicio.getDate() + 30);
+      const fechaInicioStr = fechaInicio.toISOString().slice(0, 19).replace('T', ' ');
+      const fechaExpStr = fechaExp.toISOString().slice(0, 19).replace('T', ' ');
+
+      await mysqlConn.execute(
+        "INSERT INTO planes_usuario (usuario_id, nombre_plan, fecha_inicio, fecha_expiracion) VALUES (?, ?, ?, ?)",
+        [usuario_id, 'Gratis', fechaInicioStr, fechaExpStr]
+      );
+
+      // Insertar créditos por defecto
+      await mysqlConn.execute(
+        "INSERT INTO creditos_usuario (usuario_id, creditos_actuales) VALUES (?, ?)",
+        [usuario_id, 3]
+      );
+
+    } finally {
+      mysqlConn.release();
+    }
 
     const token = jwt.sign({ id: newUser._id }, process.env.JWT_SECRET, { expiresIn: "7d" });
     res.status(201).json({ token });
 
   } catch (err) {
-    console.error("Error en /register:", err);
+    console.error("❌ Error en /register:", err);
     res.status(500).json({ message: "Error al registrar el usuario." });
   }
 });
@@ -124,7 +148,7 @@ router.get('/me', authMiddleware, async (req, res) => {
       }
     });
   } catch (err) {
-    console.error("Error en /me:", err.message);
+    console.error("❌ Error en /me:", err.message);
     res.status(500).json({ message: "Error al obtener datos del usuario." });
   } finally {
     if (connectionMySql) connectionMySql.release();
