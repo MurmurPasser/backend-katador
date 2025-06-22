@@ -3,149 +3,93 @@
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const authMiddleware = require('../middleware/authMiddleware');
-const mysql = require('mysql2/promise');
 
-const poolMySqlRailway = mysql.createPool({
-  host: process.env.MYSQLHOST,
-  user: process.env.MYSQLUSER,
-  password: process.env.MYSQLPASSWORD,
-  database: process.env.MYSQLDATABASE,
-  port: process.env.MYSQLPORT,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-});
-
-// Verificar conexión MySQL
-(async () => {
-  let testConn;
-  try {
-    testConn = await poolMySqlRailway.getConnection();
-    console.log("✅ Conexión a MySQL establecida");
-    await testConn.ping();
-  } catch (err) {
-    console.error("❌ Error al conectar a MySQL:", err.message);
-  } finally {
-    if (testConn) testConn.release();
-  }
-})();
-
-// Registro de usuario
+// ------------------
+//  Registro (POST /api/auth/register)
+// ------------------
 router.post('/register', async (req, res) => {
+  const { role, alias, phone, email, password } = req.body;
   try {
-    const { email, password, alias, role, phone } = req.body;
+    const user = new User({
+      role,
+      alias,
+      phone: (role === 'modelo' && phone && phone.trim() !== '') ? phone.trim() : undefined,
+      email,
+      password
+    });
+    await user.save();
 
-    if (!email || !password || !alias || !role) {
-      return res.status(400).json({ message: "Faltan campos obligatorios." });
-    }
-
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ message: "El usuario ya existe." });
-    }
-
-    const newUser = new User({ email, password, alias, role, phone });
-    await newUser.save();
-
-    const mysqlConn = await poolMySqlRailway.getConnection();
-    try {
-      const [insertResult] = await mysqlConn.execute(
-        `INSERT INTO usuarios 
-           (mongodb_id, nombre_usuario, correo, password_hash, tipo_usuario, estado) 
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [
-          newUser._id.toString(),
-          alias,
-          email,
-          'external_auth_only',
-          role,
-          'activo'
-        ]
-      );
-
-      const usuario_id = insertResult.insertId;
-
-      const fechaInicio = new Date();
-      const fechaExp = new Date();
-      fechaExp.setDate(fechaInicio.getDate() + 30);
-
-      const fechaInicioStr = fechaInicio.toISOString().slice(0, 19).replace('T', ' ');
-      const fechaExpStr = fechaExp.toISOString().slice(0, 19).replace('T', ' ');
-
-      await mysqlConn.execute(
-        `INSERT INTO planes_usuario
-           (usuario_id, nombre_plan, fecha_inicio, fecha_expiracion)
-         VALUES (?, ?, ?, ?)`,
-        [usuario_id, 'Gratis', fechaInicioStr, fechaExpStr]
-      );
-
-      await mysqlConn.execute(
-        `INSERT INTO creditos_usuario
-           (usuario_id, creditos_actuales)
-         VALUES (?, ?)`,
-        [usuario_id, 3]
-      );
-    } finally {
-      mysqlConn.release();
-    }
-
+    // Generar token al registrar
     const token = jwt.sign(
-      {
-        id: newUser._id,
-        role: newUser.role,
-        alias: newUser.alias,
-        email: newUser.email
-      },
+      { id: user._id, role: user.role, email: user.email, alias: user.alias },
       process.env.JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: '24h' }
     );
 
-    return res.status(201).json({ success: true, token });
-
-  } catch (err) {
-    console.error("❌ Error en /register:", err);
-    return res.status(500).json({ message: "Error al registrar el usuario." });
-  }
-});
-
-// Login de usuario
-router.post('/login', async (req, res) => {
-  const { email, password } = req.body;
-
-  try {
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(400).json({ message: "Credenciales inválidas." });
-    }
-
-    const isMatch = await user.matchPassword(password);
-    if (!isMatch) {
-      return res.status(400).json({ message: "Credenciales inválidas." });
-    }
-
-    const token = jwt.sign(
-      {
+    res.status(201).json({
+      message: 'Usuario registrado exitosamente.',
+      userId: user._id,
+      token: token,
+      user: {
         id: user._id,
         role: user.role,
         alias: user.alias,
         email: user.email
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    return res.json({ token });
-
-  } catch (err) {
-    console.error("❌ Error en /login:", err);
-    return res.status(500).json({ message: "Error al iniciar sesión." });
+      }
+    });
+  } catch (error) {
+    console.error('Error durante el registro:', error);
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(val => val.message);
+      return res.status(400).json({ message: messages.join(', ') });
+    }
+    if (error.code === 11000) {
+      return res.status(400).json({ message: 'El correo electrónico ya está registrado.' });
+    }
+    res.status(500).json({ message: 'Error interno del servidor durante el registro.' });
   }
 });
 
-// Validación del token
+// ------------------
+//  Login (POST /api/auth/login)
+// ------------------
+router.post('/login', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ message: 'Por favor, ingrese correo electrónico y contraseña.' });
+  }
+  try {
+    const user = await User.findOne({ email });
+    if (user && (await user.matchPassword(password))) {
+      const token = jwt.sign(
+        { id: user._id, role: user.role, email: user.email, alias: user.alias },
+        process.env.JWT_SECRET,
+        { expiresIn: '24h' }
+      );
+      res.status(200).json({
+        message: 'Login exitoso',
+        token,
+        user: {
+          id: user._id,
+          role: user.role,
+          alias: user.alias,
+          email: user.email
+        }
+      });
+    } else {
+      res.status(401).json({ message: 'Credenciales inválidas (correo o contraseña incorrectos).' });
+    }
+  } catch (error) {
+    console.error('Error durante el login:', error);
+    res.status(500).json({ message: 'Error interno del servidor durante el login.' });
+  }
+});
+
+// ------------------
+//  Obtener datos del usuario (GET /api/auth/me)
+// ------------------
 router.get('/me', authMiddleware, (req, res) => {
   try {
     res.status(200).json({
