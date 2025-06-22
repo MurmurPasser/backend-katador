@@ -5,7 +5,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
-const authMiddleware = require('../middleware/authMiddleware');
+const authMiddleware =require('../middleware/authMiddleware'); // <-- El import ya existía, lo cual es correcto.
 const mysql = require('mysql2/promise');
 
 const poolMySqlRailway = mysql.createPool({
@@ -56,12 +56,6 @@ router.post('/register', async (req, res) => {
     await newUser.save();
 
     // 4) Insertar en la tabla `usuarios` de MySQL:
-    //    ● mongodb_id  = newUser._id.toString()
-    //    ● nombre_usuario = alias
-    //    ● correo = email
-    //    ● password_hash = ''    ← aquí almacenamos cadena vacía, porque no usamos login MySQL
-    //    ● tipo_usuario = role
-    //    ● estado = 'activo'
     const mysqlConn = await poolMySqlRailway.getConnection();
     try {
       const [insertResult] = await mysqlConn.execute(
@@ -72,7 +66,7 @@ router.post('/register', async (req, res) => {
           newUser._id.toString(),
           alias,
           email,
-          '',          // ← password_hash vacío para no romper NOT NULL
+          '',       // ← password_hash vacío para no romper NOT NULL
           role,
           'activo'
         ]
@@ -81,7 +75,7 @@ router.post('/register', async (req, res) => {
 
       // 5) Crear plan por defecto "Gratis" (duración 30 días)
       const fechaInicio = new Date();
-      const fechaExp   = new Date();
+      const fechaExp    = new Date();
       fechaExp.setDate(fechaInicio.getDate() + 30);
 
       const fechaInicioStr = fechaInicio.toISOString().slice(0, 19).replace('T', ' ');
@@ -106,7 +100,7 @@ router.post('/register', async (req, res) => {
     }
 
     // 7) Generar JWT (MongoDB) y devolver al cliente
-    const token = jwt.sign({ id: newUser._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: newUser._id, role: newUser.role, alias: newUser.alias, email: newUser.email }, process.env.JWT_SECRET, { expiresIn: '7d' });
     return res.status(201).json({ token });
 
   } catch (err) {
@@ -134,7 +128,7 @@ router.post('/login', async (req, res) => {
     }
 
     // 3) Generar JWT y devolver
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: user._id, role: user.role, alias: user.alias, email: user.email }, process.env.JWT_SECRET, { expiresIn: '7d' });
     return res.json({ token });
 
   } catch (err) {
@@ -143,81 +137,31 @@ router.post('/login', async (req, res) => {
   }
 });
 
+
 // ------------------
-//  Obtener datos del usuario (/api/auth/me)
+//  Obtener datos del usuario (/api/auth/me) - VERSIÓN SIMPLIFICADA PARA AUTH_SYNC
 // ------------------
-router.get('/me', authMiddleware, async (req, res) => {
-  let connectionMySql = null;
-  try {
-    const userMongoId = req.user.id;
-    const userMongo   = await User.findById(userMongoId).select('-password');
-    if (!userMongo) {
-      return res.status(404).json({ message: "Usuario no encontrado." });
+// Este endpoint es usado por auth_sync.php para validar el token.
+// Devuelve directamente la información contenida en el token sin consultar la base de datos,
+// lo cual es mucho más rápido y eficiente para este propósito.
+router.get('/me', authMiddleware, (req, res) => {
+    try {
+        // El middleware 'authMiddleware' ya ha validado el token y ha puesto
+        // los datos del usuario en 'req.user'. Simplemente los devolvemos.
+        res.status(200).json({
+            user: {
+                id: req.user.id,
+                _id: req.user.id, // Se incluye _id por consistencia
+                role: req.user.role,
+                alias: req.user.alias,
+                email: req.user.email
+            }
+        });
+    } catch (error) {
+        console.error('Error en /auth/me:', error);
+        res.status(500).json({ message: 'Error interno del servidor.' });
     }
-
-    // Estructuras por defecto (si no hay plan o créditos en MySQL)
-    let planInfo     = { nombre_plan: 'Gratis' };
-    let creditosInfo = { creditos_actuales: 0 };
-
-    // Conectar a MySQL y buscar plan + créditos
-    connectionMySql = await poolMySqlRailway.getConnection();
-
-    // 1) Obtener el `id` de MySQL (tabla `usuarios`) usando mongodb_id
-    const [mysqlUserRows] = await connectionMySql.execute(
-      `SELECT id 
-         FROM usuarios 
-        WHERE mongodb_id = ? 
-        LIMIT 1`,
-      [userMongoId]
-    );
-    if (mysqlUserRows.length > 0) {
-      const mySqlUserId = mysqlUserRows[0].id;
-
-      // 2) Obtener el plan activo más reciente
-      const [planRows] = await connectionMySql.execute(
-        `SELECT nombre_plan 
-           FROM planes_usuario 
-          WHERE usuario_id = ? 
-            AND fecha_expiracion >= CURDATE() 
-          ORDER BY fecha_expiracion DESC 
-          LIMIT 1`,
-        [mySqlUserId]
-      );
-      if (planRows.length > 0) {
-        planInfo = planRows[0];
-      }
-
-      // 3) Obtener créditos actuales
-      const [creditosRows] = await connectionMySql.execute(
-        `SELECT creditos_actuales 
-           FROM creditos_usuario 
-          WHERE usuario_id = ? 
-          LIMIT 1`,
-        [mySqlUserId]
-      );
-      if (creditosRows.length > 0) {
-        creditosInfo = creditosRows[0];
-      }
-    }
-
-    // 4) Devolver JSON con datos combinados
-    return res.json({
-      user: {
-        _id:         userMongo._id,
-        email:       userMongo.email,
-        alias:       userMongo.alias,
-        role:        userMongo.role,
-        plan_info:   planInfo,
-        creditos_info: creditosInfo
-      }
-    });
-
-  } catch (err) {
-    console.error("❌ Error en /me:", err.message);
-    return res.status(500).json({ message: "Error al obtener datos del usuario." });
-  } finally {
-    if (connectionMySql) connectionMySql.release();
-  }
 });
+
 
 module.exports = router;
