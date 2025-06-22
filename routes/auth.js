@@ -101,7 +101,7 @@ router.post('/register', async (req, res) => {
 
     // 7) Generar JWT (MongoDB) y devolver al cliente
     const token = jwt.sign({ id: newUser._id, role: newUser.role, alias: newUser.alias, email: newUser.email }, process.env.JWT_SECRET, { expiresIn: '7d' });
-    return res.status(201).json({ token });
+    return res.status(201).json({ success: true, token });
 
   } catch (err) {
     console.error("❌ Error en /register:", err);
