@@ -1,108 +1,166 @@
-// routes/auth.js
+// File: routes/auth.js
 
 const express = require('express');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const User = require('../models/User');
 const router = express.Router();
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const User = require('../models/User');
+const authMiddleware = require('../middleware/authMiddleware');
+const mysql = require('mysql2/promise');
 
-// 🎯 ENDPOINT DE REGISTRO
-router.post('/register', async (req, res) => {
-    try {
-        const { alias, email, password, role, phone } = req.body;
-
-        // Validaciones básicas
-        if (!email || !password || !role || !alias) {
-            return res.status(400).json({ message: 'Todos los campos (alias, email, password, role) son obligatorios.' });
-        }
-        if (role === 'modelo' && !phone) {
-            return res.status(400).json({ message: 'El teléfono es obligatorio para el rol de modelo.' });
-        }
-
-        const existingUser = await User.findOne({ email });
-        if (existingUser) {
-            return res.status(409).json({ message: 'El correo electrónico ya está registrado.' });
-        }
-
-        const newUser = new User({
-            alias,
-            // Asignar créditos iniciales solo si el rol es 'modelo'
-            creditos_actuales: role === 'modelo' ? 10 : 0,
-            role,
-            phone: (role === 'modelo' && phone && phone.trim() !== '') ? phone.trim() : undefined,
-            email,
-            password
-        });
-        await newUser.save();
-
-        // --- INICIO DE LA CORRECCIÓN ---
-        // Generar token inmediatamente después del registro
-        const token = jwt.sign(
-            { id: newUser._id, role: newUser.role, alias: newUser.alias, email: newUser.email },
-            process.env.JWT_SECRET,
-            { expiresIn: '7d' }
-        );
-
-        // Devolver respuesta unificada con token y datos del usuario
-        res.status(201).json({
-            success: true,
-            token,
-            user: {
-                _id: newUser._id,
-                alias: newUser.alias,
-                email: newUser.email,
-                role: newUser.role,
-                creditos_actuales: newUser.creditos_actuales
-            }
-        });
-        // --- FIN DE LA CORRECCIÓN ---
-
-    } catch (error) {
-        console.error('Error durante el registro:', error);
-        res.status(500).json({ message: 'Error interno del servidor al intentar registrar el usuario.', error: error.message });
-    }
+const poolMySqlRailway = mysql.createPool({
+  host: process.env.MYSQLHOST,
+  user: process.env.MYSQLUSER,
+  password: process.env.MYSQLPASSWORD,
+  database: process.env.MYSQLDATABASE,
+  port: process.env.MYSQLPORT,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
 });
 
+// Verificar conexión MySQL
+(async () => {
+  let testConn;
+  try {
+    testConn = await poolMySqlRailway.getConnection();
+    console.log("✅ Conexión a MySQL establecida");
+    await testConn.ping();
+  } catch (err) {
+    console.error("❌ Error al conectar a MySQL:", err.message);
+  } finally {
+    if (testConn) testConn.release();
+  }
+})();
 
-// 🎯 ENDPOINT DE LOGIN
-router.post('/login', async (req, res) => {
-    try {
-        const { email, password } = req.body;
-        if (!email || !password) {
-            return res.status(400).json({ message: 'Email y password son requeridos.' });
-        }
+// Registro de usuario
+router.post('/register', async (req, res) => {
+  try {
+    const { email, password, alias, role, phone } = req.body;
 
-        const user = await User.findOne({ email });
-        if (!user) {
-            return res.status(401).json({ message: 'Credenciales inválidas.' });
-        }
-
-        const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) {
-            return res.status(401).json({ message: 'Credenciales inválidas.' });
-        }
-
-        const token = jwt.sign(
-            { id: user._id, role: user.role, alias: user.alias, email: user.email },
-            process.env.JWT_SECRET,
-            { expiresIn: '7d' }
-        );
-
-        res.json({
-            success: true,
-            token,
-            user: {
-                _id: user._id,
-                alias: user.alias,
-                email: user.email,
-                role: user.role,
-                creditos_actuales: user.creditos_actuales
-            }
-        });
-
-    } catch (error) {
-        res.status(500).json({ message: 'Error del servidor.' });
+    if (!email || !password || !alias || !role) {
+      return res.status(400).json({ message: "Faltan campos obligatorios." });
     }
+
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ message: "El usuario ya existe." });
+    }
+
+    const newUser = new User({ email, password, alias, role, phone });
+    await newUser.save();
+
+    const mysqlConn = await poolMySqlRailway.getConnection();
+    try {
+      const [insertResult] = await mysqlConn.execute(
+        `INSERT INTO usuarios 
+           (mongodb_id, nombre_usuario, correo, password_hash, tipo_usuario, estado) 
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          newUser._id.toString(),
+          alias,
+          email,
+          'external_auth_only',
+          role,
+          'activo'
+        ]
+      );
+
+      const usuario_id = insertResult.insertId;
+
+      const fechaInicio = new Date();
+      const fechaExp = new Date();
+      fechaExp.setDate(fechaInicio.getDate() + 30);
+
+      const fechaInicioStr = fechaInicio.toISOString().slice(0, 19).replace('T', ' ');
+      const fechaExpStr = fechaExp.toISOString().slice(0, 19).replace('T', ' ');
+
+      await mysqlConn.execute(
+        `INSERT INTO planes_usuario
+           (usuario_id, nombre_plan, fecha_inicio, fecha_expiracion)
+         VALUES (?, ?, ?, ?)`,
+        [usuario_id, 'Gratis', fechaInicioStr, fechaExpStr]
+      );
+
+      await mysqlConn.execute(
+        `INSERT INTO creditos_usuario
+           (usuario_id, creditos_actuales)
+         VALUES (?, ?)`,
+        [usuario_id, 3]
+      );
+    } finally {
+      mysqlConn.release();
+    }
+
+    const token = jwt.sign(
+      {
+        id: newUser._id,
+        role: newUser.role,
+        alias: newUser.alias,
+        email: newUser.email
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    return res.status(201).json({ success: true, token });
+
+  } catch (err) {
+    console.error("❌ Error en /register:", err);
+    return res.status(500).json({ message: "Error al registrar el usuario." });
+  }
+});
+
+// Login de usuario
+router.post('/login', async (req, res) => {
+  const { email, password } = req.body;
+
+  try {
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(400).json({ message: "Credenciales inválidas." });
+    }
+
+    const isMatch = await user.matchPassword(password);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Credenciales inválidas." });
+    }
+
+    const token = jwt.sign(
+      {
+        id: user._id,
+        role: user.role,
+        alias: user.alias,
+        email: user.email
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    return res.json({ token });
+
+  } catch (err) {
+    console.error("❌ Error en /login:", err);
+    return res.status(500).json({ message: "Error al iniciar sesión." });
+  }
+});
+
+// Validación del token
+router.get('/me', authMiddleware, (req, res) => {
+  try {
+    res.status(200).json({
+      user: {
+        id: req.user.id,
+        _id: req.user.id,
+        role: req.user.role,
+        alias: req.user.alias,
+        email: req.user.email
+      }
+    });
+  } catch (error) {
+    console.error('Error en /auth/me:', error);
+    res.status(500).json({ message: 'Error interno del servidor.' });
+  }
 });
 
 module.exports = router;
