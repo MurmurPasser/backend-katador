@@ -66,7 +66,7 @@ router.post('/register', async (req, res) => {
           newUser._id.toString(),
           alias,
           email,
-          '',       // ← password_hash vacío para no romper NOT NULL
+          '',       password_hash: 'external_auth_only',
           role,
           'activo'
         ]
