@@ -1,4 +1,5 @@
 // File: routes/auth.js
+
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
@@ -18,23 +19,21 @@ const poolMySqlRailway = mysql.createPool({
   queueLimit: 0
 });
 
-// 🚀 Verificar conexión MySQL al iniciar
+// Verificar conexión MySQL
 (async () => {
   let testConn;
   try {
     testConn = await poolMySqlRailway.getConnection();
-    console.log("✅ Conexión a MySQL de Railway (para planes) establecida y probada con ping.");
+    console.log("✅ Conexión a MySQL establecida");
     await testConn.ping();
   } catch (err) {
-    console.error("❌ FALLO INICIAL al conectar a MySQL:", err.message);
+    console.error("❌ Error al conectar a MySQL:", err.message);
   } finally {
     if (testConn) testConn.release();
   }
 })();
 
-// ------------------
-//  Registro (POST /api/auth/register)
-// ------------------
+// Registro de usuario
 router.post('/register', async (req, res) => {
   try {
     const { email, password, alias, role, phone } = req.body;
@@ -61,7 +60,7 @@ router.post('/register', async (req, res) => {
           newUser._id.toString(),
           alias,
           email,
-          'external_auth_only',  // ✅ valor válido para bypass
+          'external_auth_only',
           role,
           'activo'
         ]
@@ -89,7 +88,6 @@ router.post('/register', async (req, res) => {
          VALUES (?, ?)`,
         [usuario_id, 3]
       );
-
     } finally {
       mysqlConn.release();
     }
@@ -113,9 +111,7 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// ------------------
-//  Login (POST /api/auth/login)
-// ------------------
+// Login de usuario
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
 
@@ -149,9 +145,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// ------------------
-//  Obtener datos del usuario (/api/auth/me)
-// ------------------
+// Validación del token
 router.get('/me', authMiddleware, (req, res) => {
   try {
     res.status(200).json({
