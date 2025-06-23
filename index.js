@@ -24,7 +24,7 @@ mongoose.connect(process.env.MONGO_URI, {
 // Rutas
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/credits', require('./routes/credits')); // <--- ⚡ REGISTRO DE LA RUTA DE CRÉDITOS
-
+app.use('/api/kps', require('./routes/kps'));
 // Home para prueba
 app.get('/', (req, res) => res.send("Backend funcionando ✅"));
 
