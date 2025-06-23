@@ -3,7 +3,7 @@
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
+const bcrypt = require('bcrypt');
 const User = require('../models/User');
 const authMiddleware = require('../middleware/authMiddleware');
 const mysql = require('mysql2/promise');
@@ -111,33 +111,75 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// Login de usuario
+// Login de usuario - Híbrido MongoDB + MySQL
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
 
   try {
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(400).json({ message: "Credenciales inválidas." });
+    // 1. Try MongoDB first (legacy users)
+    const mongoUser = await User.findOne({ email });
+    if (mongoUser) {
+      const isMatch = await mongoUser.matchPassword(password);
+      if (!isMatch) {
+        return res.status(400).json({ message: "Credenciales inválidas." });
+      }
+
+      const token = jwt.sign(
+        {
+          id: mongoUser._id,
+          role: mongoUser.role,
+          alias: mongoUser.alias,
+          email: mongoUser.email
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+
+      return res.json({ token });
     }
 
-    const isMatch = await user.matchPassword(password);
-    if (!isMatch) {
+    // 2. Try MySQL (new system)
+    const mysqlConn = await poolMySqlRailway.getConnection();
+    try {
+      const [users] = await mysqlConn.execute(
+        'SELECT id, correo, password_hash, nombre_usuario, tipo_usuario FROM usuarios WHERE correo = ? AND estado = "activo"',
+        [email]
+      );
+
+      if (users.length > 0) {
+        const user = users[0];
+        
+        // Check if password_hash is bcrypt or needs to be migrated
+        if (user.password_hash === 'external_auth_only') {
+          return res.status(400).json({ message: "Usuario requiere autenticación externa." });
+        }
+
+        // Verify password with bcrypt
+        const isValidPassword = await bcrypt.compare(password, user.password_hash);
+        if (!isValidPassword) {
+          return res.status(400).json({ message: "Credenciales inválidas." });
+        }
+
+        const token = jwt.sign(
+          {
+            id: user.id,
+            role: user.tipo_usuario,
+            alias: user.nombre_usuario,
+            email: user.correo
+          },
+          process.env.JWT_SECRET,
+          { expiresIn: '7d' }
+        );
+
+        return res.json({ token });
+      }
+
+      // User not found in either system
       return res.status(400).json({ message: "Credenciales inválidas." });
+
+    } finally {
+      mysqlConn.release();
     }
-
-    const token = jwt.sign(
-      {
-        id: user._id,
-        role: user.role,
-        alias: user.alias,
-        email: user.email
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    return res.json({ token });
 
   } catch (err) {
     console.error("❌ Error en /login:", err);
