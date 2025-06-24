@@ -213,94 +213,8 @@ app.post('/api/kps/register', async (req, res) => {
     }
 });
 
-// Login endpoint for KPS users
-//app.post('/api/auth/login', async (req, res) => {
-   // let connection;
-    
-    //try {
-        //const { usuario, clave } = req.body;
+// Login endpoint removed - use routes/auth.js instead
         
-        //if (!usuario || !clave) {
-            //return res.status(400).json({
-                //success: false,
-                //error: 'Usuario y contraseña requeridos',
-                //code: 'MISSING_CREDENTIALS'
-            //});
-        //}
-        
-        connection = await mysql.createConnection(dbConfig);
-        
-        // Get user from KPS table
-        const [users] = await connection.execute(`
-            SELECT id, usuario, clave_hash, nombre_agencia, email_contacto, estado_kps
-            FROM kps_usuarios_agencia 
-            WHERE usuario = ? AND es_kps = 1 AND estado_kps = 'aprobado'
-        `, [usuario]);
-        
-        if (users.length === 0) {
-            return res.status(401).json({
-                success: false,
-                error: 'Credenciales inválidas',
-                code: 'INVALID_CREDENTIALS'
-            });
-        }
-        
-        const user = users[0];
-        
-        // Verify password with bcrypt
-        const isValidPassword = await bcrypt.compare(clave, user.clave_hash);
-        
-        if (!isValidPassword) {
-            return res.status(401).json({
-                success: false,
-                error: 'Credenciales inválidas',
-                code: 'INVALID_CREDENTIALS'
-            });
-        }
-        
-        // Generate JWT token
-        const token = jwt.sign(
-            {
-                id: user.id,
-                usuario: user.usuario,
-                nombre_agencia: user.nombre_agencia,
-                email: user.email_contacto,
-                type: 'kps'
-            },
-            JWT_SECRET,
-            { expiresIn: '24h' }
-        );
-        
-        console.log(`[LOGIN] Success - Usuario: ${usuario}, ID: ${user.id}`);
-        
-        res.json({
-            success: true,
-            message: 'Login exitoso',
-            token: token,
-            user: {
-                id: user.id,
-                usuario: user.usuario,
-                nombre_agencia: user.nombre_agencia,
-                email: user.email_contacto,
-                type: 'kps'
-            }
-        });
-        
-    } catch (error) {
-        console.error('[LOGIN] Error:', error);
-        
-        res.status(500).json({
-            success: false,
-            error: 'Error interno del servidor',
-            code: 'INTERNAL_SERVER_ERROR'
-        });
-        
-    } finally {
-        if (connection) {
-            await connection.end();
-        }
-    }
-});
 
 // Verify JWT token endpoint
 app.get('/auth/me', async (req, res) => {
@@ -326,7 +240,7 @@ app.get('/auth/me', async (req, res) => {
         console.error('[AUTH-ME] Error:', error.message);
         
         if (error.name === 'TokenExpiredError') {
-            return res.status(41).json({
+            return res.status(401).json({
                 success: false,
                 error: 'Token expirado',
                 code: 'TOKEN_EXPIRED'
