@@ -1,3 +1,5 @@
+// index.js (o tu archivo principal del servidor)
+
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
@@ -8,6 +10,9 @@ require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// 🔧 Solución aquí: Habilita confianza en el proxy (Railway, Vercel, etc.)
+app.set('trust proxy', 1);
 
 // Database configuration for Railway MySQL
 const dbConfig = {
@@ -321,7 +326,7 @@ app.get('/auth/me', async (req, res) => {
         console.error('[AUTH-ME] Error:', error.message);
         
         if (error.name === 'TokenExpiredError') {
-            return res.status(401).json({
+            return res.status(41).json({
                 success: false,
                 error: 'Token expirado',
                 code: 'TOKEN_EXPIRED'
