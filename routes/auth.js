@@ -39,8 +39,8 @@ router.post('/register', async (req, res) => {
     const { email, password, alias, role, phone } = req.body;
 
     if (!email || !password || !alias || !role) {
-      return res.status(400).json({ message: "Faltan campos obligatorios." });
-    }
+  return sendError(res, 400, "MISSING_FIELDS", "Faltan campos obligatorios.", "email");
+}
 
     const existingUser = await User.findOne({ email });
     if (existingUser) {
