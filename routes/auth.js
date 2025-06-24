@@ -8,6 +8,13 @@ const User = require('../models/User');
 const authMiddleware = require('../middleware/authMiddleware');
 const mysql = require('mysql2/promise');
 
+// Función centralizada para errores
+function sendError(res, status, code, message, field = null) {
+  const payload = { success: false, code, message };
+  if (field) payload.field = field;
+  return res.status(status).json(payload);
+}
+
 const poolMySqlRailway = mysql.createPool({
   host: process.env.MYSQLHOST,
   user: process.env.MYSQLUSER,
@@ -39,14 +46,13 @@ router.post('/register', async (req, res) => {
     const { email, password, alias, role, phone } = req.body;
 
     if (!email || !password || !alias || !role) {
-  return sendError(res, 400, "MISSING_FIELDS", "Faltan campos obligatorios.", "email");
-}
+      return sendError(res, 400, "MISSING_FIELDS", "Faltan campos obligatorios.", "email");
+    }
 
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      return res.status(400).json({ message: "El usuario ya existe." });
+      return sendError(res, 400, "EMAIL_ALREADY_EXISTS", "Ya existe un usuario con ese correo.", "email");
     }
-
     const newUser = new User({ email, password, alias, role, phone });
     await newUser.save();
 
@@ -54,8 +60,8 @@ router.post('/register', async (req, res) => {
     try {
       const [insertResult] = await mysqlConn.execute(
         `INSERT INTO usuarios 
-           (mongodb_id, nombre_usuario, correo, password_hash, tipo_usuario, estado) 
-         VALUES (?, ?, ?, ?, ?, ?)`,
+          (mongodb_id, nombre_usuario, correo, password_hash, tipo_usuario, estado) 
+        VALUES (?, ?, ?, ?, ?, ?)`,
         [
           newUser._id.toString(),
           alias,
@@ -77,15 +83,15 @@ router.post('/register', async (req, res) => {
 
       await mysqlConn.execute(
         `INSERT INTO planes_usuario
-           (usuario_id, nombre_plan, fecha_inicio, fecha_expiracion)
-         VALUES (?, ?, ?, ?)`,
+          (usuario_id, nombre_plan, fecha_inicio, fecha_expiracion)
+        VALUES (?, ?, ?, ?)`,
         [usuario_id, 'Gratis', fechaInicioStr, fechaExpStr]
       );
 
       await mysqlConn.execute(
         `INSERT INTO creditos_usuario
-           (usuario_id, creditos_actuales)
-         VALUES (?, ?)`,
+          (usuario_id, creditos_actuales)
+        VALUES (?, ?)`,
         [usuario_id, 3]
       );
     } finally {
@@ -107,7 +113,7 @@ router.post('/register', async (req, res) => {
 
   } catch (err) {
     console.error("❌ Error en /register:", err);
-    return res.status(500).json({ message: "Error al registrar el usuario." });
+    return sendError(res, 500, "REGISTRATION_ERROR", "Error al registrar el usuario.");
   }
 });
 
