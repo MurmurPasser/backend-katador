@@ -214,19 +214,19 @@ app.post('/api/kps/register', async (req, res) => {
 });
 
 // Login endpoint for KPS users
-app.post('/api/auth/login', async (req, res) => {
-    let connection;
+//app.post('/api/auth/login', async (req, res) => {
+   // let connection;
     
-    try {
-        const { usuario, clave } = req.body;
+    //try {
+        //const { usuario, clave } = req.body;
         
-        if (!usuario || !clave) {
-            return res.status(400).json({
-                success: false,
-                error: 'Usuario y contraseña requeridos',
-                code: 'MISSING_CREDENTIALS'
-            });
-        }
+        //if (!usuario || !clave) {
+            //return res.status(400).json({
+                //success: false,
+                //error: 'Usuario y contraseña requeridos',
+                //code: 'MISSING_CREDENTIALS'
+            //});
+        //}
         
         connection = await mysql.createConnection(dbConfig);
         
