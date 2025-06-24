@@ -20,6 +20,15 @@ const dbConfig = {
     acquireTimeout: 60000,
     timeout: 60000,
 };
+const mongoose = require('mongoose');
+
+// Conexión a MongoDB en Railway
+mongoose.connect(process.env.MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+})
+.then(() => console.log('✅ Conectado a MongoDB en Railway'))
+.catch(err => console.error('❌ Error conectando MongoDB:', err));
 
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production';
