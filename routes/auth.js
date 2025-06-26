@@ -51,7 +51,7 @@ router.post('/register', async (req, res) => {
     }
 
     // ✅ Validación de roles permitidos
-    const validRoles = ['katador', 'modelo', 'admin', 'agencia'];
+    const validRoles = ['katador', 'modelo', 'admin', 'agencia', 'kps'];
     if (!validRoles.includes(role)) {
       return sendError(res, 400, "INVALID_ROLE", "Rol no válido.", "role");
     }
@@ -88,8 +88,8 @@ router.post('/register', async (req, res) => {
       const usuario_id = insertResult.insertId;
 
       // ✅ Configuración específica por rol
-      if (role === 'agencia') {
-        // Para agencias: insertar en kps_usuarios_agencia
+      if (role === 'agencia' || role === 'kps') {
+        // Para agencias KPS: insertar en kps_usuarios_agencia
         await mysqlConn.execute(
           `INSERT INTO kps_usuarios_agencia 
             (usuario, user_id_railway, nombre_agencia, es_kps, estado_kps, template) 
