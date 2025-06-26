@@ -68,6 +68,12 @@ router.post('/register', async (req, res) => {
     const newUser = new User({ email, password, alias, role, phone });
     await newUser.save();
 
+    /* --- INICIO DEL BLOQUE COMENTADO - MYSQL LEGACY ---
+    * DECISIÓN ESTRATÉGICA: Eliminar dependencia con tabla usuarios de MySQL
+    * Railway opera exclusivamente con MongoDB como única fuente de verdad
+    * Este bloque se comenta para eliminar errores "Data truncated" y simplificar arquitectura
+    */
+    /*
     const mysqlConn = await poolMySqlRailway.getConnection();
     try {
       // ✅ Insertar en tabla usuarios general
@@ -124,6 +130,8 @@ router.post('/register', async (req, res) => {
     } finally {
       mysqlConn.release();
     }
+    */
+    /* --- FIN DEL BLOQUE COMENTADO - MYSQL LEGACY --- */
 
     const token = jwt.sign(
       {
@@ -144,12 +152,12 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// Login de usuario - Híbrido MongoDB + MySQL
+// Login de usuario - MongoDB como única fuente de verdad
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
 
   try {
-    // 1. Try MongoDB first (legacy users)
+    // MongoDB como única fuente de verdad para autenticación
     const mongoUser = await User.findOne({ email });
     if (mongoUser) {
       const isMatch = await mongoUser.matchPassword(password);
@@ -178,6 +186,11 @@ router.post('/login', async (req, res) => {
       });
     }
 
+    /* --- INICIO DEL BLOQUE COMENTADO - MYSQL LOGIN LEGACY ---
+    * DECISIÓN ESTRATÉGICA: Eliminar dependencia con tabla usuarios de MySQL
+    * Railway opera exclusivamente con MongoDB como única fuente de verdad
+    */
+    /*
     // 2. Try MySQL (new system)
     const mysqlConn = await poolMySqlRailway.getConnection();
     try {
@@ -227,6 +240,11 @@ router.post('/login', async (req, res) => {
     } finally {
       mysqlConn.release();
     }
+    */
+    /* --- FIN DEL BLOQUE COMENTADO - MYSQL LOGIN LEGACY --- */
+
+    // Usuario no encontrado en MongoDB
+    return res.status(400).json({ message: "Credenciales inválidas." });
 
   } catch (err) {
     console.error("❌ Error en /login:", err);
