@@ -141,7 +141,14 @@ router.post('/login', async (req, res) => {
         { expiresIn: '7d' }
       );
 
-      return res.json({ token });
+      // 👇 Respuesta enriquecida para frontend PHP
+      return res.json({
+        token,
+        id: mongoUser._id,
+        role: mongoUser.role,
+        alias: mongoUser.alias,
+        email: mongoUser.email
+      });
     }
 
     // 2. Try MySQL (new system)
@@ -177,7 +184,14 @@ router.post('/login', async (req, res) => {
           { expiresIn: '7d' }
         );
 
-        return res.json({ token });
+        // 👇 Respuesta enriquecida para frontend PHP
+        return res.json({
+          token,
+          id: user.id,
+          role: user.tipo_usuario,
+          alias: user.nombre_usuario,
+          email: user.correo
+        });
       }
 
       // User not found in either system
