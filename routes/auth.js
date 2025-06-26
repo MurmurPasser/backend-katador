@@ -45,8 +45,20 @@ router.post('/register', async (req, res) => {
   try {
     const { email, password, alias, role, phone } = req.body;
 
+    // ✅ Validación mejorada de campos obligatorios
     if (!email || !password || !alias || !role) {
       return sendError(res, 400, "MISSING_FIELDS", "Faltan campos obligatorios.", "email");
+    }
+
+    // ✅ Validación de roles permitidos
+    const validRoles = ['katador', 'modelo', 'admin', 'agencia'];
+    if (!validRoles.includes(role)) {
+      return sendError(res, 400, "INVALID_ROLE", "Rol no válido.", "role");
+    }
+
+    // ✅ Validación de contraseña mínima
+    if (password.length < 6) {
+      return sendError(res, 400, "WEAK_PASSWORD", "La contraseña debe tener al menos 6 caracteres.", "password");
     }
 
     const existingUser = await User.findOne({ email });
@@ -58,6 +70,7 @@ router.post('/register', async (req, res) => {
 
     const mysqlConn = await poolMySqlRailway.getConnection();
     try {
+      // ✅ Insertar en tabla usuarios general
       const [insertResult] = await mysqlConn.execute(
         `INSERT INTO usuarios 
           (mongodb_id, nombre_usuario, correo, password_hash, tipo_usuario, estado) 
@@ -74,26 +87,40 @@ router.post('/register', async (req, res) => {
 
       const usuario_id = insertResult.insertId;
 
-      const fechaInicio = new Date();
-      const fechaExp = new Date();
-      fechaExp.setDate(fechaInicio.getDate() + 30);
+      // ✅ Configuración específica por rol
+      if (role === 'agencia') {
+        // Para agencias: insertar en kps_usuarios_agencia
+        await mysqlConn.execute(
+          `INSERT INTO kps_usuarios_agencia 
+            (usuario, user_id_railway, nombre_agencia, es_kps, estado_kps, template) 
+          VALUES (?, ?, ?, ?, ?, ?)`,
+          [email, newUser._id.toString(), alias, 1, 'activo', null]
+        );
+      } else {
+        // Para otros roles: configurar planes y créditos
+        const fechaInicio = new Date();
+        const fechaExp = new Date();
+        fechaExp.setDate(fechaInicio.getDate() + 30);
 
-      const fechaInicioStr = fechaInicio.toISOString().slice(0, 19).replace('T', ' ');
-      const fechaExpStr = fechaExp.toISOString().slice(0, 19).replace('T', ' ');
+        const fechaInicioStr = fechaInicio.toISOString().slice(0, 19).replace('T', ' ');
+        const fechaExpStr = fechaExp.toISOString().slice(0, 19).replace('T', ' ');
 
-      await mysqlConn.execute(
-        `INSERT INTO planes_usuario
-          (usuario_id, nombre_plan, fecha_inicio, fecha_expiracion)
-        VALUES (?, ?, ?, ?)`,
-        [usuario_id, 'Gratis', fechaInicioStr, fechaExpStr]
-      );
+        await mysqlConn.execute(
+          `INSERT INTO planes_usuario
+            (usuario_id, nombre_plan, fecha_inicio, fecha_expiracion)
+          VALUES (?, ?, ?, ?)`,
+          [usuario_id, 'Gratis', fechaInicioStr, fechaExpStr]
+        );
 
-      await mysqlConn.execute(
-        `INSERT INTO creditos_usuario
-          (usuario_id, creditos_actuales)
-        VALUES (?, ?)`,
-        [usuario_id, 3]
-      );
+        // ✅ Créditos iniciales: 3 para modelos/katadores, 0 para admin
+        const creditosIniciales = (role === 'modelo' || role === 'katador') ? 3 : 0;
+        await mysqlConn.execute(
+          `INSERT INTO creditos_usuario
+            (usuario_id, creditos_actuales)
+          VALUES (?, ?)`,
+          [usuario_id, creditosIniciales]
+        );
+      }
     } finally {
       mysqlConn.release();
     }
@@ -224,5 +251,6 @@ router.get('/me', authMiddleware, (req, res) => {
     res.status(500).json({ message: 'Error interno del servidor.' });
   }
 });
+
 
 module.exports = router;
