@@ -51,7 +51,7 @@ router.post('/register', async (req, res) => {
     }
 
     // ✅ Validación de roles permitidos
-    const validRoles = ['katador', 'modelo', 'admin', 'agencia', 'kps'];
+    const validRoles = ['katador', 'modelo', 'admin', 'agencia', 'kps', 'modelo_kps'];
     if (!validRoles.includes(role)) {
       return sendError(res, 400, "INVALID_ROLE", "Rol no válido.", "role");
     }
